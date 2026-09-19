@@ -41,7 +41,7 @@ def generate_content_with_retry(client, model_name, prompt, max_retries=5):
             )
             return response
         except APIError as e:
-            if e.code == 503 and attempt < max_retries - 1:
+            if getattr(e, 'code', None) == 503 and attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 3  # Menunggu 3s, 6s, 9s, 12s...
                 st.warning(f"Server Gemini sibuk (503). Mencoba ulang dalam {wait_time} detik... (Percobaan {attempt + 1}/{max_retries})")
                 time.sleep(wait_time)
@@ -71,9 +71,10 @@ Text to translate:
 {full_prompt_text}"""
 
                 with st.spinner("AI sedang menerjemahkan seluruh subtitle..."):
+                    # Menggunakan model gemini-3.6-flash
                     response = generate_content_with_retry(
                         client=client,
-                        model_name="gemini-2.5-flash",
+                        model_name="gemini-3.6-flash",
                         prompt=prompt
                     )
                     
