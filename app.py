@@ -52,8 +52,9 @@ Text to translate:
 {full_prompt_text}"""
 
                 with st.spinner("AI sedang menerjemahkan seluruh subtitle..."):
+                    # Menggunakan model versi terbaru: gemini-3.6-flash
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=prompt
                     )
                     
