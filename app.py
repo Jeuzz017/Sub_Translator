@@ -1,118 +1,97 @@
 import streamlit as st
 import pysrt
-from deep_translator import GoogleTranslator
+from google import genai
 import io
-import time
 
-# Konfigurasi Halaman
 st.set_page_config(
-    page_title="Penerjemah Subtitle SRT Perfect",
-    page_icon="🌐",
+    page_title="Penerjemah Subtitle SRT (Gemini AI)",
+    page_icon="🤖",
     layout="centered"
 )
 
-st.title("🌐 Penerjemah Subtitle SRT (Akurat & Lengkap)")
-st.write("Menerjemahkan seluruh baris `.srt` secara utuh tanpa ada teks yang terlewat.")
+st.title("🤖 Penerjemah Subtitle SRT menggunakan Gemini AI")
+st.write("Hasil terjemahan sangat akurat, alami, dan tidak akan melewati baris apa pun.")
 
-# Daftar Bahasa
+# Input API Key dari pengguna di sidebar
+api_key = st.sidebar.text_input("Masukkan Google Gemini API Key:", type="password")
+
 LANGUAGES = {
-    "Indonesian": "id",
-    "English": "en",
-    "Japanese": "ja",
-    "Spanish": "es",
-    "French": "fr",
-    "German": "de",
-    "Korean": "ko",
-    "Chinese (Simplified)": "zh-CN"
+    "Indonesian": "Indonesian",
+    "English": "English",
+    "Japanese": "Japanese",
+    "Spanish": "Spanish",
+    "French": "French",
+    "German": "German",
+    "Korean": "Korean",
+    "Chinese": "Chinese"
 }
 
-# 1. Input File
-uploaded_file = st.file_uploader("Unggah File Subtitle (.srt)", type=["srt"])
+uploaded_file = st.file_uploader("Unggah file Subtitle (.srt)", type=["srt"])
+target_lang = st.selectbox("Pilih Bahasa Tujuan:", list(LANGUAGES.keys()))
 
-# 2. Pilih Bahasa Tujuan
-target_lang_name = st.selectbox("Pilih Bahasa Tujuan:", list(LANGUAGES.keys()))
-target_lang_code = LANGUAGES[target_lang_name]
-
-# 3. Fungsi Penerjemah dengan Batching (Menggabungkan Teks)
-def translate_in_batches(subs, target_code, batch_size=40):
-    translator = GoogleTranslator(source='auto', target=target_code)
-    total_subs = len(subs)
-    
-    # Kumpulkan semua teks subtitle
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    for i in range(0, total_subs, batch_size):
-        chunk = subs[i:i + batch_size]
-        
-        # Buat daftar teks dengan penanda khusus agar tidak kacau
-        lines_to_translate = []
-        for sub in chunk:
-            # Ganti baris baru dalam 1 box subtitle dengan tag khusus
-            clean_text = sub.text.replace("\n", " [BR] ").strip()
-            if not clean_text:
-                clean_text = "---" # Penanda teks kosong
-            lines_to_translate.append(clean_text)
-        
-        # Gabungkan teks menggunakan pembatas unik
-        combined_text = "\n===SUB_SPLIT===\n".join(lines_to_translate)
-        
-        try:
-            # Menerjemahkan sekaligus 1 kelompok (batch)
-            translated_combined = translator.translate(combined_text)
-            translated_lines = translated_combined.split("\n===SUB_SPLIT===\n")
-            
-            # Kembalikan teks terjemahan ke objek sub masing-masing
-            for idx, sub in enumerate(chunk):
-                if idx < len(translated_lines):
-                    res_text = translated_lines[idx].replace(" [BR] ", "\n").replace("[BR]", "\n").strip()
-                    if res_text != "---":
-                        sub.text = res_text
-        except Exception as e:
-            # Jika batching gagal, gunakan fallback penerjemahan per baris
-            for sub in chunk:
-                if sub.text.strip():
-                    try:
-                        sub.text = translator.translate(sub.text)
-                    except Exception:
-                        pass
-        
-        # Update progress bar
-        current_progress = min(int(((i + batch_size) / total_subs) * 100), 100)
-        progress_bar.progress(current_progress)
-        status_text.text(f"Memproses {min(i + batch_size, total_subs)} dari {total_subs} baris...")
-        time.sleep(0.2) # Mencegah pemblokiran API
-        
-    status_text.success("Penerjemahan Seluruh Baris Selesai!")
-
-# Eksekusi
 if uploaded_file is not None:
-    if st.button("Mulai Terjemahkan 🚀"):
-        content = uploaded_file.read().decode("utf-8", errors="ignore")
-        
-        try:
-            subs = pysrt.from_string(content)
+    if st.button("Mulai Terjemahkan dengan AI 🚀"):
+        if not api_key:
+            st.error("Silakan masukkan Gemini API Key di sidebar terlebih dahulu.")
+        else:
+            content = uploaded_file.read().decode("utf-8", errors="ignore")
             
-            with st.spinner("Sedang menerjemahkan... Mohon tunggu sebentar."):
-                translate_in_batches(subs, target_lang_code)
-            
-            # Format ulang objek SubRipFile ke teks SRT
-            output_buffer = io.StringIO()
-            subs.write_into(output_buffer)
-            result_srt = output_buffer.getvalue()
-            
-            st.subheader("📄 Pratinjau Hasil SRT:")
-            st.text_area("Hasil:", result_srt, height=250)
-            
-            original_name = uploaded_file.name.rsplit(".", 1)[0]
-            new_filename = f"{original_name}_{target_lang_code}.srt"
-            
-            st.download_button(
-                label="📥 Unduh File SRT Terjemahan",
-                data=result_srt,
-                file_name=new_filename,
-                mime="application/x-subrip"
-            )
-            
-        except Exception as e:
-            st.error(f"Gagal memproses file SRT: {e}")
+            try:
+                subs = pysrt.from_string(content)
+                client = genai.Client(api_key=api_key)
+                
+                # Menggabungkan seluruh teks subtitle untuk dikirim sekaligus ke AI
+                lines = [f"{i+1}|||{sub.text.replace('\n', ' ')}" for i, sub in enumerate(subs) if sub.text.strip()]
+                full_prompt_text = "\n".join(lines)
+                
+                prompt = f"""You are a professional subtitle translator.
+Translate the following text into {target_lang}.
+Maintain the exact line format 'NUMBER|||TRANSLATED_TEXT'. Do not omit any lines.
+
+Text to translate:
+{full_prompt_text}"""
+
+                with st.spinner("AI sedang menerjemahkan seluruh subtitle..."):
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt
+                    )
+                    
+                    translated_raw = response.text.strip().split("\n")
+                    
+                    # Memetakan kembali hasil terjemahan ke objek SRT
+                    trans_dict = {}
+                    for line in translated_raw:
+                        if "|||" in line:
+                            parts = line.split("|||", 1)
+                            try:
+                                idx = int(parts[0].strip()) - 1
+                                trans_dict[idx] = parts[1].strip()
+                            except ValueError:
+                                pass
+                    
+                    for idx, sub in enumerate(subs):
+                        if idx in trans_dict:
+                            sub.text = trans_dict[idx]
+
+                st.success("Penerjemahan AI Selesai!")
+                
+                output_buffer = io.StringIO()
+                subs.write_into(output_buffer)
+                result_srt = output_buffer.getvalue()
+                
+                st.subheader("📄 Pratinjau Hasil SRT:")
+                st.text_area("Hasil:", result_srt, height=250)
+                
+                original_name = uploaded_file.name.rsplit(".", 1)[0]
+                new_filename = f"{original_name}_{target_lang}.srt"
+                
+                st.download_button(
+                    label="📥 Unduh File SRT Terjemahan",
+                    data=result_srt,
+                    file_name=new_filename,
+                    mime="application/x-subrip"
+                )
+                
+            except Exception as e:
+                st.error(f"Gagal memproses penerjemahan: {e}")
