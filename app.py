@@ -1,7 +1,9 @@
 import streamlit as st
 import pysrt
 from google import genai
+from google.genai.errors import APIError
 import io
+import time
 
 st.set_page_config(
     page_title="Penerjemah Subtitle SRT (Gemini AI)",
@@ -29,6 +31,23 @@ LANGUAGES = {
 uploaded_file = st.file_uploader("Unggah file Subtitle (.srt)", type=["srt"])
 target_lang = st.selectbox("Pilih Bahasa Tujuan:", list(LANGUAGES.keys()))
 
+# Fungsi pemanggilan API dengan Retry saat 503 Overloaded
+def generate_content_with_retry(client, model_name, prompt, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            return response
+        except APIError as e:
+            if e.code == 503 and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 3  # Menunggu 3s, 6s, 9s, 12s...
+                st.warning(f"Server Gemini sibuk (503). Mencoba ulang dalam {wait_time} detik... (Percobaan {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                raise e
+
 if uploaded_file is not None:
     if st.button("Mulai Terjemahkan dengan AI 🚀"):
         if not api_key:
@@ -52,10 +71,10 @@ Text to translate:
 {full_prompt_text}"""
 
                 with st.spinner("AI sedang menerjemahkan seluruh subtitle..."):
-                    # Menggunakan model versi terbaru: gemini-3.6-flash
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=prompt
+                    response = generate_content_with_retry(
+                        client=client,
+                        model_name="gemini-2.5-flash",
+                        prompt=prompt
                     )
                     
                     translated_raw = response.text.strip().split("\n")
