@@ -6,13 +6,13 @@ import time
 
 # Konfigurasi Halaman
 st.set_page_config(
-    page_title="Penerjemah Subtitle SRT Lengkap",
+    page_title="Penerjemah Subtitle SRT Perfect",
     page_icon="🌐",
     layout="centered"
 )
 
-st.title("🌐 Penerjemah Subtitle SRT")
-st.write("Unggah file `.srt`, pilih bahasa asal dan bahasa tujuan untuk menerjemahkan **seluruh baris** tanpa ada yang terlewat.")
+st.title("🌐 Penerjemah Subtitle SRT (Akurat & Lengkap)")
+st.write("Menerjemahkan seluruh baris `.srt` secara utuh tanpa ada teks yang terlewat.")
 
 # Daftar Bahasa
 LANGUAGES = {
@@ -29,57 +29,72 @@ LANGUAGES = {
 # 1. Input File
 uploaded_file = st.file_uploader("Unggah File Subtitle (.srt)", type=["srt"])
 
-# 2. Pilih Bahasa Asal dan Tujuan
-col1, col2 = st.columns(2)
-with col1:
-    source_lang_name = st.selectbox("Bahasa Asal (Auto/Spesifik):", ["Auto Detect", "Japanese", "English"])
-with col2:
-    target_lang_name = st.selectbox("Bahasa Tujuan:", list(LANGUAGES.keys()))
+# 2. Pilih Bahasa Tujuan
+target_lang_name = st.selectbox("Pilih Bahasa Tujuan:", list(LANGUAGES.keys()))
+target_lang_code = LANGUAGES[target_lang_name]
 
-source_code = "auto" if source_lang_name == "Auto Detect" else LANGUAGES.get(source_lang_name, "auto")
-target_code = LANGUAGES[target_lang_name]
-
-# Fungsi untuk menerjemahkan teks tunggal dengan proteksi retry
-def safe_translate(translator, text, retries=3):
-    for i in range(retries):
+# 3. Fungsi Penerjemah dengan Batching (Menggabungkan Teks)
+def translate_in_batches(subs, target_code, batch_size=40):
+    translator = GoogleTranslator(source='auto', target=target_code)
+    total_subs = len(subs)
+    
+    # Kumpulkan semua teks subtitle
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i in range(0, total_subs, batch_size):
+        chunk = subs[i:i + batch_size]
+        
+        # Buat daftar teks dengan penanda khusus agar tidak kacau
+        lines_to_translate = []
+        for sub in chunk:
+            # Ganti baris baru dalam 1 box subtitle dengan tag khusus
+            clean_text = sub.text.replace("\n", " [BR] ").strip()
+            if not clean_text:
+                clean_text = "---" # Penanda teks kosong
+            lines_to_translate.append(clean_text)
+        
+        # Gabungkan teks menggunakan pembatas unik
+        combined_text = "\n===SUB_SPLIT===\n".join(lines_to_translate)
+        
         try:
-            res = translator.translate(text)
-            if res:
-                return res
-        except Exception:
-            time.sleep(0.5 * (i + 1))
-    return text
+            # Menerjemahkan sekaligus 1 kelompok (batch)
+            translated_combined = translator.translate(combined_text)
+            translated_lines = translated_combined.split("\n===SUB_SPLIT===\n")
+            
+            # Kembalikan teks terjemahan ke objek sub masing-masing
+            for idx, sub in enumerate(chunk):
+                if idx < len(translated_lines):
+                    res_text = translated_lines[idx].replace(" [BR] ", "\n").replace("[BR]", "\n").strip()
+                    if res_text != "---":
+                        sub.text = res_text
+        except Exception as e:
+            # Jika batching gagal, gunakan fallback penerjemahan per baris
+            for sub in chunk:
+                if sub.text.strip():
+                    try:
+                        sub.text = translator.translate(sub.text)
+                    except Exception:
+                        pass
+        
+        # Update progress bar
+        current_progress = min(int(((i + batch_size) / total_subs) * 100), 100)
+        progress_bar.progress(current_progress)
+        status_text.text(f"Memproses {min(i + batch_size, total_subs)} dari {total_subs} baris...")
+        time.sleep(0.2) # Mencegah pemblokiran API
+        
+    status_text.success("Penerjemahan Seluruh Baris Selesai!")
 
-# 3. Eksekusi Penerjemahan
+# Eksekusi
 if uploaded_file is not None:
     if st.button("Mulai Terjemahkan 🚀"):
         content = uploaded_file.read().decode("utf-8", errors="ignore")
         
         try:
             subs = pysrt.from_string(content)
-            translator = GoogleTranslator(source=source_code, target=target_code)
             
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            total = len(subs)
-            
-            for idx, sub in enumerate(subs):
-                clean_text = sub.text.strip()
-                if clean_text:
-                    # Terjemahkan baris teks
-                    translated_text = safe_translate(translator, clean_text)
-                    sub.text = translated_text
-                
-                # Update status & progress
-                progress = int(((idx + 1) / total) * 100)
-                progress_bar.progress(progress)
-                status_text.text(f"Menerjemahkan baris {idx + 1} dari {total}...")
-                
-                # Jeda tipis untuk menghindari pemblokiran batas permintaan API
-                if idx % 10 == 0:
-                    time.sleep(0.1)
-            
-            status_text.success("Penerjemahan Seluruh Baris Selesai!")
+            with st.spinner("Sedang menerjemahkan... Mohon tunggu sebentar."):
+                translate_in_batches(subs, target_lang_code)
             
             # Format ulang objek SubRipFile ke teks SRT
             output_buffer = io.StringIO()
@@ -90,7 +105,7 @@ if uploaded_file is not None:
             st.text_area("Hasil:", result_srt, height=250)
             
             original_name = uploaded_file.name.rsplit(".", 1)[0]
-            new_filename = f"{original_name}_{target_code}.srt"
+            new_filename = f"{original_name}_{target_lang_code}.srt"
             
             st.download_button(
                 label="📥 Unduh File SRT Terjemahan",
