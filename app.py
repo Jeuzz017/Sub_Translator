@@ -1,9 +1,8 @@
 import streamlit as st
 import pysrt
-from googletrans import Translator
-import io
+from deep_translator import GoogleTranslator
 
-# Konfigurasi Halaman Streamlit
+# Konfigurasi Halaman
 st.set_page_config(
     page_title="Penerjemah Subtitle & Dokumen",
     page_icon="🌐",
@@ -13,16 +12,13 @@ st.set_page_config(
 st.title("🌐 Penerjemah File Subtitle (SRT & Teks)")
 st.write("Unggah file subtitle (`.srt`) atau teks (`.txt`), pilih bahasa tujuan, lalu unduh hasilnya!")
 
-# Inisialisasi Translator
-translator = Translator()
-
-# Daftar Bahasa Populer
+# Daftar Bahasa (Bahasa Asal -> Kode)
 LANGUAGES = {
     "Indonesian": "id",
     "English": "en",
     "Japanese": "ja",
     "Korean": "ko",
-    "Mandarin (Simplified)": "zh-cn",
+    "Chinese (Simplified)": "zh-CN",
     "Spanish": "es",
     "French": "fr",
     "German": "de",
@@ -38,9 +34,10 @@ target_lang_code = LANGUAGES[target_lang_name]
 
 # Fungsi Penerjemah SRT
 def translate_srt(file_bytes, target_lang):
-    # Membaca isi file SRT dari stream memori
     content = file_bytes.decode("utf-8", errors="ignore")
     subs = pysrt.from_string(content)
+    
+    translator = GoogleTranslator(source='auto', target=target_lang)
     
     total_items = len(subs)
     progress_bar = st.progress(0)
@@ -49,12 +46,10 @@ def translate_srt(file_bytes, target_lang):
     for idx, sub in enumerate(subs):
         if sub.text.strip():
             try:
-                translated = translator.translate(sub.text, dest=target_lang)
-                sub.text = translated.text
-            except Exception as e:
-                pass # Jika gagal translate 1 baris, lewati
+                sub.text = translator.translate(sub.text)
+            except Exception:
+                pass # Lewati jika ada baris yang gagal
         
-        # Update progress bar
         progress = int(((idx + 1) / total_items) * 100)
         progress_bar.progress(progress)
         status_text.text(f"Menerjemahkan baris {idx + 1} dari {total_items}...")
@@ -65,8 +60,8 @@ def translate_srt(file_bytes, target_lang):
 # Fungsi Penerjemah TXT
 def translate_txt(file_bytes, target_lang):
     text = file_bytes.decode("utf-8", errors="ignore")
-    translated = translator.translate(text, dest=target_lang)
-    return translated.text
+    translator = GoogleTranslator(source='auto', target=target_lang)
+    return translator.translate(text)
 
 # 3. Tombol Eksekusi
 if uploaded_file is not None:
@@ -81,15 +76,12 @@ if uploaded_file is not None:
             else:
                 result_text = translate_txt(file_bytes, target_lang_code)
             
-            # Pratinjau Hasil
             st.subheader("📄 Pratinjau Hasil Terjemahan:")
             st.text_area("Hasil:", result_text, height=200)
             
-            # Buat Nama File Baru
             original_name = uploaded_file.name.rsplit(".", 1)[0]
             new_filename = f"{original_name}_{target_lang_code}.{file_extension}"
             
-            # Tombol Unduh
             st.download_button(
                 label="📥 Unduh File Terjemahan",
                 data=result_text,
